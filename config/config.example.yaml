@@ -1,0 +1,68 @@
+# FileAssistant Configuration Example
+# Copy this file to one of these locations and customize:
+#   - config/default_config.yaml (project directory)
+#   - ~/.config/fileassistant/config.yaml (user config)
+#   - ~/.fileassistant/config.yaml (alternative user config)
+
+# --- REQUIRED: Folders to Monitor ---
+inbox_folders:
+  - ~/Downloads
+  - ~/Desktop
+  - ~/Screenshots  # Add custom folders as needed
+
+# --- Base Directory for Organized Files ---
+# Where FileAssistant will organize your files
+organized_base_path: ~/Documents/FileAssistant
+
+# --- Confidence Thresholds ---
+# Control when FileAssistant acts automatically vs. asks for approval
+confidence_thresholds:
+  high: 0.9    # Files classified with >90% confidence: act automatically, log silently
+  medium: 0.6  # 60-90% confidence: act automatically, show in activity feed for review
+  # Below 60%: always ask user before moving
+
+# --- Processing Settings ---
+processing:
+  idle_only: true           # Only process files when computer is idle (recommended)
+  debounce_seconds: 2       # Wait 2 seconds after file stops changing before processing
+  max_file_size_mb: 100     # Skip files larger than 100MB
+  batch_size: 10            # Process up to 10 files at once
+
+# --- AI Settings ---
+ai_settings:
+  # Ollama model for classification (install via: ollama pull qwen2.5)
+  model_name: "qwen2.5:latest"
+
+  # Embedding model for semantic similarity (auto-downloaded)
+  embedding_model: "all-MiniLM-L6-v2"
+
+  # Lower temperature = more consistent, higher = more creative
+  temperature: 0.1
+
+  # Ollama API endpoint (default local installation)
+  ollama_base_url: "http://localhost:11434"
+
+  max_retries: 3
+
+# --- Logging ---
+logging:
+  level: "INFO"              # Set to DEBUG for troubleshooting
+  log_dir: "logs"
+  max_bytes: 10485760        # 10MB per log file
+  backup_count: 5            # Keep 5 rotated log files
+  console_enabled: true
+  file_enabled: true
+
+# --- Database ---
+database:
+  path: "data/fileassistant.db"
+  vector_store_path: "data/chromadb"
+  backup_enabled: true
+  backup_interval_hours: 24
+
+# --- Feature Flags ---
+# Start with manual mode, enable auto-processing once you trust the system
+auto_process_enabled: false
+
+# Learn from your corrections to improve over time
+learning_enabled: true
