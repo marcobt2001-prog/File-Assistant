@@ -13,4 +13,15 @@ from .config import get_config
 from .database import get_database
 from .utils.logging import get_logger
 
-__all__ = ["get_config", "get_database", "get_logger"]
+# Phase 1 components
+from .analyzer import AnalysisResult, FileAnalyzer
+from .watcher import FileWatcher
+
+__all__ = [
+    "get_config",
+    "get_database",
+    "get_logger",
+    "FileWatcher",
+    "FileAnalyzer",
+    "AnalysisResult",
+]
