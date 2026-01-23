@@ -15,13 +15,27 @@ from .utils.logging import get_logger
 
 # Phase 1 components
 from .analyzer import AnalysisResult, FileAnalyzer
+from .classifier import ClassificationResult, FileClassifier
+from .core import FileProcessor, ProcessingResult
+from .mover import FileMover, MoveResult
 from .watcher import FileWatcher
 
 __all__ = [
     "get_config",
     "get_database",
     "get_logger",
+    # Watcher
     "FileWatcher",
+    # Analyzer
     "FileAnalyzer",
     "AnalysisResult",
+    # Classifier
+    "FileClassifier",
+    "ClassificationResult",
+    # Mover
+    "FileMover",
+    "MoveResult",
+    # Core processor
+    "FileProcessor",
+    "ProcessingResult",
 ]

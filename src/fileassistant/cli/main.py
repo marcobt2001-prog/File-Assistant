@@ -538,5 +538,351 @@ def scan(folder: Path, recursive: bool):
     console.print(f"\n[green]✓ Scan complete:[/green] {success_count} succeeded, {error_count} failed")
 
 
+# =============================================================================
+# Phase 1: Process Command (Full Pipeline)
+# =============================================================================
+
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def process(ctx, file_path: Path):
+    """
+    Process a single file through the full pipeline.
+
+    Analyzes the file, classifies it using AI, prompts for confirmation,
+    and moves it to the appropriate destination.
+
+    FILE_PATH is the path to the file to process.
+    """
+    from ..analyzer import get_supported_extensions
+    from ..core import FileProcessor
+    from ..database import get_database
+
+    console.print("\n[bold cyan]FileAssistant File Processor[/bold cyan]\n")
+
+    # Check file type
+    supported = get_supported_extensions()
+    if file_path.suffix.lower() not in supported:
+        console.print(
+            f"[yellow]⚠ Unsupported file type:[/yellow] {file_path.suffix}\n"
+            f"[dim]Supported: {', '.join(sorted(supported))}[/dim]"
+        )
+        sys.exit(1)
+
+    try:
+        config_manager = get_config_manager(ctx.obj.get("config_path"))
+        config = config_manager.load()
+
+        # Initialize database
+        db = get_database(config.database.path)
+        db.create_all_tables()
+        session = db.get_session()
+
+        # Create processor
+        processor = FileProcessor(config=config, db_session=session)
+
+        # Check system readiness
+        is_ready, issues = processor.check_system_ready()
+        if not is_ready:
+            console.print("[bold red]System not ready:[/bold red]")
+            for issue in issues:
+                console.print(f"  • {issue}")
+            console.print("\n[yellow]Please fix the issues above and try again.[/yellow]")
+            sys.exit(1)
+
+        # Process the file
+        result = processor.process_file(file_path, interactive=True)
+
+        # Summary
+        console.print()
+        if result.success:
+            console.print("[bold green]✓ File processed successfully![/bold green]")
+            console.print(f"  Final location: {result.move_result.destination_path}")
+        elif result.skipped:
+            console.print("[bold yellow]File skipped by user[/bold yellow]")
+        else:
+            console.print(f"[bold red]✗ Processing failed:[/bold red] {result.error_message}")
+            sys.exit(1)
+
+        session.close()
+
+    except FileNotFoundError:
+        console.print(
+            "[yellow]⚠ No configuration found. Run:[/yellow] [cyan]fileassistant init[/cyan]"
+        )
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Process command error")
+        sys.exit(1)
+
+
+@cli.command(name="run")
+@click.option(
+    "--folder",
+    type=click.Path(exists=True, path_type=Path),
+    multiple=True,
+    help="Specific folder(s) to watch (defaults to config inbox_folders)",
+)
+@click.pass_context
+def run_pipeline(ctx, folder: tuple[Path, ...]):
+    """
+    Watch folders and process files through the full pipeline.
+
+    This is the main command for using FileAssistant. It watches configured
+    inbox folders, and when a new file is detected:
+    1. Analyzes the file content
+    2. Classifies it using local AI (Ollama)
+    3. Prompts you for confirmation
+    4. Moves it to the organized location
+
+    Press Ctrl+C to stop watching.
+    """
+    import queue
+    import threading
+
+    from ..analyzer import get_supported_extensions
+    from ..core import FileProcessor
+    from ..database import get_database
+    from ..watcher import FileWatcher, SUPPORTED_EXTENSIONS
+
+    console.print("\n[bold cyan]FileAssistant - Full Pipeline Mode[/bold cyan]\n")
+
+    try:
+        config_manager = get_config_manager(ctx.obj.get("config_path"))
+        config = config_manager.load()
+
+        # Override inbox folders if specified
+        if folder:
+            config.inbox_folders = list(folder)
+
+        # Initialize database
+        db = get_database(config.database.path)
+        db.create_all_tables()
+        session = db.get_session()
+
+        # Create processor
+        processor = FileProcessor(config=config, db_session=session)
+
+        # Check system readiness
+        console.print("[cyan]Checking system readiness...[/cyan]")
+        is_ready, issues = processor.check_system_ready()
+        if not is_ready:
+            console.print("[bold red]System not ready:[/bold red]")
+            for issue in issues:
+                console.print(f"  • {issue}")
+            console.print("\n[yellow]Please fix the issues above and try again.[/yellow]")
+            sys.exit(1)
+        console.print("[green]✓ System ready[/green]\n")
+
+        # Display configuration
+        console.print(f"[cyan]AI Model:[/cyan] {config.ai_settings.model_name}")
+        console.print(f"[cyan]Organized files:[/cyan] {config.organized_base_path}")
+        console.print(f"[cyan]Supported extensions:[/cyan] {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
+        console.print(f"[cyan]Debounce delay:[/cyan] {config.processing.debounce_seconds}s\n")
+
+        console.print("[cyan]Watching folders:[/cyan]")
+        for f in config.inbox_folders:
+            exists = "✓" if f.exists() else "✗ (will create)"
+            console.print(f"  • {f} {exists}")
+
+        # File processing queue
+        file_queue: queue.Queue[Path] = queue.Queue()
+        stop_event = threading.Event()
+
+        def on_file_ready(file_path: Path):
+            """Callback when a file is ready for processing."""
+            console.print(f"\n[green]New file detected:[/green] {file_path.name}")
+            file_queue.put(file_path)
+
+        # Create watcher
+        watcher = FileWatcher(config=config, on_file_ready=on_file_ready)
+
+        # Check for existing files
+        existing = watcher.scan_existing()
+        if existing:
+            console.print(f"\n[cyan]Found {len(existing)} existing file(s) to process[/cyan]")
+            process_existing = click.confirm("Process existing files?", default=True)
+            if process_existing:
+                for f in existing:
+                    file_queue.put(f)
+
+        console.print("\n[yellow]Press Ctrl+C to stop[/yellow]")
+        console.print("[green]Watching for new files...[/green]\n")
+
+        # Stats
+        stats = {"processed": 0, "skipped": 0, "errors": 0}
+
+        with watcher:
+            try:
+                while not stop_event.is_set():
+                    try:
+                        # Check for files to process
+                        file_path = file_queue.get(timeout=1.0)
+
+                        # Process the file
+                        console.print()
+                        console.rule(f"[bold]Processing: {file_path.name}[/bold]")
+
+                        result = processor.process_file(file_path, interactive=True)
+
+                        if result.success:
+                            stats["processed"] += 1
+                            console.print(f"[green]✓ Moved to:[/green] {result.move_result.destination_path}")
+                        elif result.skipped:
+                            stats["skipped"] += 1
+                        else:
+                            stats["errors"] += 1
+                            console.print(f"[red]✗ Error:[/red] {result.error_message}")
+
+                        console.print()
+                        console.print("[green]Watching for more files...[/green]")
+
+                    except queue.Empty:
+                        continue
+
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopping...[/yellow]")
+                stop_event.set()
+
+        # Summary
+        console.print()
+        console.print("[bold cyan]Session Summary[/bold cyan]")
+        console.print(f"  Files processed: [green]{stats['processed']}[/green]")
+        console.print(f"  Files skipped:   [yellow]{stats['skipped']}[/yellow]")
+        console.print(f"  Errors:          [red]{stats['errors']}[/red]")
+
+        session.close()
+
+    except FileNotFoundError:
+        console.print(
+            "[yellow]⚠ No configuration found. Run:[/yellow] [cyan]fileassistant init[/cyan]"
+        )
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Run command error")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--limit", "-n", default=10, help="Number of recent actions to show")
+@click.pass_context
+def history(ctx, limit: int):
+    """
+    Show recent file processing history.
+
+    Displays recently processed files and their destinations.
+    """
+    from ..database import Action, ActionType, get_database
+
+    console.print("\n[bold cyan]FileAssistant History[/bold cyan]\n")
+
+    try:
+        config_manager = get_config_manager(ctx.obj.get("config_path"))
+        config = config_manager.load()
+
+        db = get_database(config.database.path)
+        session = db.get_session()
+
+        # Get recent actions
+        actions = (
+            session.query(Action)
+            .filter(Action.action_type == ActionType.MOVE.value)
+            .order_by(Action.timestamp.desc())
+            .limit(limit)
+            .all()
+        )
+
+        if not actions:
+            console.print("[yellow]No history found.[/yellow]")
+            return
+
+        table = Table(title="Recent Actions", show_header=True, header_style="bold cyan")
+        table.add_column("ID", style="dim")
+        table.add_column("Time", style="cyan")
+        table.add_column("File", style="green", max_width=30)
+        table.add_column("Destination", style="blue", max_width=40)
+        table.add_column("Status", style="yellow")
+
+        for action in actions:
+            before = action.before_state or {}
+            after = action.after_state or {}
+            filename = before.get("filename", "?")
+            dest = after.get("path", "?")
+
+            # Truncate long paths
+            if len(dest) > 40:
+                dest = "..." + dest[-37:]
+
+            status = "[dim]undone[/dim]" if action.undone else "[green]✓[/green]"
+            time_str = action.timestamp.strftime("%Y-%m-%d %H:%M")
+
+            table.add_row(str(action.id), time_str, filename, dest, status)
+
+        console.print(table)
+
+        session.close()
+
+    except FileNotFoundError:
+        console.print(
+            "[yellow]⚠ No configuration found. Run:[/yellow] [cyan]fileassistant init[/cyan]"
+        )
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("History command error")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("action_id", type=int)
+@click.pass_context
+def undo(ctx, action_id: int):
+    """
+    Undo a previous file move action.
+
+    ACTION_ID is the ID of the action to undo (from 'fileassistant history').
+    """
+    from ..database import get_database
+    from ..mover import FileMover
+
+    console.print("\n[bold cyan]FileAssistant Undo[/bold cyan]\n")
+
+    try:
+        config_manager = get_config_manager(ctx.obj.get("config_path"))
+        config = config_manager.load()
+
+        db = get_database(config.database.path)
+        session = db.get_session()
+
+        mover = FileMover(
+            organized_base_path=config.organized_base_path,
+            db_session=session,
+        )
+
+        console.print(f"[cyan]Undoing action {action_id}...[/cyan]")
+        result = mover.undo_move(action_id)
+
+        if result.success:
+            console.print(f"[green]✓ File restored to:[/green] {result.destination_path}")
+        else:
+            console.print(f"[red]✗ Undo failed:[/red] {result.error_message}")
+            sys.exit(1)
+
+        session.close()
+
+    except FileNotFoundError:
+        console.print(
+            "[yellow]⚠ No configuration found. Run:[/yellow] [cyan]fileassistant init[/cyan]"
+        )
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]✗ Error:[/bold red] {e}")
+        logger.exception("Undo command error")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()
