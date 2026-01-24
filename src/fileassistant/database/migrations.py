@@ -1,10 +1,8 @@
 """Simple migration system for database schema updates."""
 
+from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, List, Optional
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..utils.logging import get_logger
@@ -22,7 +20,7 @@ class Migration:
         version: int,
         description: str,
         up: Callable[[Session], None],
-        down: Optional[Callable[[Session], None]] = None,
+        down: Callable[[Session], None] | None = None,
     ):
         """
         Initialize migration.
@@ -50,7 +48,7 @@ class MigrationManager:
             db: Database instance
         """
         self.db = db
-        self.migrations: List[Migration] = []
+        self.migrations: list[Migration] = []
 
     def register(self, migration: Migration):
         """Register a migration."""
@@ -69,15 +67,13 @@ class MigrationManager:
             Current version number (0 if no migrations applied)
         """
         try:
-            latest = (
-                session.query(SchemaVersion).order_by(SchemaVersion.version.desc()).first()
-            )
+            latest = session.query(SchemaVersion).order_by(SchemaVersion.version.desc()).first()
             return latest.version if latest else 0
         except Exception:
             # Table might not exist yet
             return 0
 
-    def apply_migrations(self, target_version: Optional[int] = None):
+    def apply_migrations(self, target_version: int | None = None):
         """
         Apply pending migrations.
 
@@ -110,9 +106,7 @@ class MigrationManager:
 
             # Apply each migration
             for migration in pending_migrations:
-                logger.info(
-                    f"Applying migration {migration.version}: {migration.description}"
-                )
+                logger.info(f"Applying migration {migration.version}: {migration.description}")
 
                 try:
                     # Run migration
@@ -155,7 +149,9 @@ class MigrationManager:
 
             # Get migrations to rollback (in reverse order)
             migrations_to_rollback = [
-                m for m in reversed(self.migrations) if target_version < m.version <= current_version
+                m
+                for m in reversed(self.migrations)
+                if target_version < m.version <= current_version
             ]
 
             logger.info(f"Rolling back {len(migrations_to_rollback)} migration(s)")
@@ -166,9 +162,7 @@ class MigrationManager:
                         f"Migration {migration.version} has no down() function - cannot rollback"
                     )
 
-                logger.info(
-                    f"Rolling back migration {migration.version}: {migration.description}"
-                )
+                logger.info(f"Rolling back migration {migration.version}: {migration.description}")
 
                 try:
                     # Run rollback
@@ -207,7 +201,7 @@ def migration_example_add_index(session: Session):
 
 
 # Initialize default migrations
-def get_default_migrations() -> List[Migration]:
+def get_default_migrations() -> list[Migration]:
     """Get list of default migrations."""
     return [
         Migration(

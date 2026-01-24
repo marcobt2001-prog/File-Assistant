@@ -1,7 +1,6 @@
 """Logging infrastructure with Rich console output and rotating file logs."""
 
 import logging
-import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
@@ -45,7 +44,7 @@ class FileAssistantLogger:
     def setup(
         self,
         level: str = "INFO",
-        log_dir: Optional[Path] = None,
+        log_dir: Path | None = None,
         max_bytes: int = 10 * 1024 * 1024,
         backup_count: int = 5,
         console_enabled: bool = True,
@@ -107,7 +106,7 @@ class FileAssistantLogger:
             file_handler.setLevel(log_level)
             self.logger.addHandler(file_handler)
 
-    def get_logger(self, name: Optional[str] = None) -> logging.Logger:
+    def get_logger(self, name: str | None = None) -> logging.Logger:
         """
         Get a logger instance.
 
@@ -139,10 +138,10 @@ class FileAssistantLogger:
 
 
 # Global logger instance
-_logger_instance: Optional[FileAssistantLogger] = None
+_logger_instance: FileAssistantLogger | None = None
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     Get a logger instance.
 
@@ -162,7 +161,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
 def setup_logging(
     level: str = "INFO",
-    log_dir: Optional[Path] = None,
+    log_dir: Path | None = None,
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 5,
     console_enabled: bool = True,

@@ -1,8 +1,6 @@
 """Configuration management - loading, validation, and persistence."""
 
-import os
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import ValidationError
@@ -19,7 +17,7 @@ class ConfigManager:
         Path.home() / ".fileassistant" / "config.yaml",
     ]
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         """
         Initialize configuration manager.
 
@@ -27,7 +25,7 @@ class ConfigManager:
             config_path: Explicit path to config file. If None, searches default locations.
         """
         self.config_path = config_path
-        self._config: Optional[FileAssistantConfig] = None
+        self._config: FileAssistantConfig | None = None
 
     def load(self, create_if_missing: bool = False) -> FileAssistantConfig:
         """
@@ -53,7 +51,7 @@ class ConfigManager:
             )
 
         try:
-            with open(config_file, "r", encoding="utf-8") as f:
+            with open(config_file, encoding="utf-8") as f:
                 config_dict = yaml.safe_load(f) or {}
 
             self._config = FileAssistantConfig(**config_dict)
@@ -65,7 +63,7 @@ class ConfigManager:
         except ValidationError as e:
             raise ValueError(f"Invalid configuration in {config_file}: {e}") from e
 
-    def save(self, config: Optional[FileAssistantConfig] = None, path: Optional[Path] = None):
+    def save(self, config: FileAssistantConfig | None = None, path: Path | None = None):
         """
         Save configuration to file.
 
@@ -103,7 +101,7 @@ class ConfigManager:
         self.config_path = save_path
         self._config = config_to_save
 
-    def _find_config_file(self) -> Optional[Path]:
+    def _find_config_file(self) -> Path | None:
         """Find the first existing config file in default locations."""
         if self.config_path and self.config_path.exists():
             return self.config_path
@@ -141,10 +139,10 @@ class ConfigManager:
 
 
 # Global config instance
-_config_manager: Optional[ConfigManager] = None
+_config_manager: ConfigManager | None = None
 
 
-def get_config_manager(config_path: Optional[Path] = None) -> ConfigManager:
+def get_config_manager(config_path: Path | None = None) -> ConfigManager:
     """
     Get global config manager instance.
 

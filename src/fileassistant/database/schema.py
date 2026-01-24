@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import (
     JSON,
@@ -14,10 +13,9 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    create_engine,
 )
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
@@ -124,7 +122,9 @@ class FileTag(Base):
     tag = relationship("Tag", back_populates="file_tags")
 
     def __repr__(self):
-        return f"<FileTag(file_id={self.file_id}, tag_id={self.tag_id}, confidence={self.confidence})>"
+        return (
+            f"<FileTag(file_id={self.file_id}, tag_id={self.tag_id}, confidence={self.confidence})>"
+        )
 
 
 class Classification(Base):

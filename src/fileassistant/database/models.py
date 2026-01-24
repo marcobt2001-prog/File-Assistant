@@ -1,7 +1,6 @@
 """Database models and ORM operations."""
 
 from pathlib import Path
-from typing import Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -55,10 +54,10 @@ class Database:
 
 
 # Global database instance
-_database: Optional[Database] = None
+_database: Database | None = None
 
 
-def get_database(db_path: Optional[Path] = None) -> Database:
+def get_database(db_path: Path | None = None) -> Database:
     """
     Get global database instance.
 

@@ -1,7 +1,6 @@
 """Configuration models using Pydantic for validation."""
 
 from pathlib import Path
-from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -25,18 +24,14 @@ class ConfidenceThresholds(BaseModel):
 class ProcessingSettings(BaseModel):
     """Settings for file processing behavior."""
 
-    idle_only: bool = Field(
-        default=True, description="Only process files when system is idle"
-    )
+    idle_only: bool = Field(default=True, description="Only process files when system is idle")
     debounce_seconds: int = Field(
         default=2, ge=0, description="Wait time after file changes before processing"
     )
     max_file_size_mb: int = Field(
         default=100, ge=1, description="Maximum file size to process (in MB)"
     )
-    batch_size: int = Field(
-        default=10, ge=1, description="Number of files to process in one batch"
-    )
+    batch_size: int = Field(default=10, ge=1, description="Number of files to process in one batch")
 
 
 class AISettings(BaseModel):
@@ -101,7 +96,7 @@ class FileAssistantConfig(BaseModel):
     """Main configuration for FileAssistant."""
 
     # Core settings
-    inbox_folders: List[Path] = Field(
+    inbox_folders: list[Path] = Field(
         default_factory=lambda: [
             Path.home() / "Downloads",
             Path.home() / "Desktop",
@@ -109,7 +104,7 @@ class FileAssistantConfig(BaseModel):
         description="Folders to monitor for new files",
     )
 
-    organized_base_path: Optional[Path] = Field(
+    organized_base_path: Path | None = Field(
         default=None, description="Base path for organized files (defaults to user's Documents)"
     )
 
@@ -143,7 +138,7 @@ class FileAssistantConfig(BaseModel):
 
     @field_validator("organized_base_path")
     @classmethod
-    def set_default_organized_path(cls, v: Optional[Path]) -> Path:
+    def set_default_organized_path(cls, v: Path | None) -> Path:
         """Set default organized path to user's Documents folder."""
         if v is None:
             return Path.home() / "Documents" / "FileAssistant"
@@ -151,7 +146,7 @@ class FileAssistantConfig(BaseModel):
 
     @field_validator("inbox_folders")
     @classmethod
-    def validate_inbox_folders(cls, v: List[Path]) -> List[Path]:
+    def validate_inbox_folders(cls, v: list[Path]) -> list[Path]:
         """Ensure inbox folders exist or can be created."""
         if not v:
             raise ValueError("At least one inbox folder must be specified")
