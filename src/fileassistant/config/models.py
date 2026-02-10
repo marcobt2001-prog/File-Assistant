@@ -52,6 +52,27 @@ class AISettings(BaseModel):
     max_retries: int = Field(default=3, ge=1, description="Maximum AI API retry attempts")
 
 
+class SearchSettings(BaseModel):
+    """Search and indexing configuration."""
+
+    enabled: bool = Field(default=True, description="Enable search functionality")
+    chunk_size: int = Field(
+        default=512, ge=100, le=2048, description="Token size for text chunking"
+    )
+    chunk_overlap: int = Field(
+        default=50, ge=0, le=200, description="Token overlap between chunks"
+    )
+    default_results: int = Field(
+        default=10, ge=1, le=100, description="Default number of search results"
+    )
+    llm_reranking: bool = Field(
+        default=False, description="Use LLM for re-ranking search results (slower but more accurate)"
+    )
+    auto_index_on_move: bool = Field(
+        default=True, description="Automatically index files when they are organized"
+    )
+
+
 class LoggingSettings(BaseModel):
     """Logging configuration."""
 
@@ -125,6 +146,10 @@ class FileAssistantConfig(BaseModel):
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings, description="Database settings"
+    )
+
+    search: SearchSettings = Field(
+        default_factory=SearchSettings, description="Search and indexing settings"
     )
 
     # Folder context for classification

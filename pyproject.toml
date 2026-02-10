@@ -128,3 +128,6 @@ addopts = [
     "--strict-config",
     "--cov=fileassistant",
 ]
+markers = [
+    "slow: marks tests as slow (require loading ML models)",
+]
