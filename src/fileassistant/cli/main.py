@@ -840,10 +840,12 @@ def history(ctx, limit: int):
 # Phase 2A: Search Commands
 # =============================================================================
 
-# Import and register the index command
+# Import and register search commands
 from .index import index_command
+from .search import search_command
 
 cli.add_command(index_command)
+cli.add_command(search_command)
 
 
 @cli.command()
