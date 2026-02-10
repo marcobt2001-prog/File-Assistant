@@ -836,6 +836,16 @@ def history(ctx, limit: int):
         sys.exit(1)
 
 
+# =============================================================================
+# Phase 2A: Search Commands
+# =============================================================================
+
+# Import and register the index command
+from .index import index_command
+
+cli.add_command(index_command)
+
+
 @cli.command()
 @click.argument("action_id", type=int)
 @click.pass_context
