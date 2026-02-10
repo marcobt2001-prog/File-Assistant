@@ -15,6 +15,7 @@ from ..config.models import FileAssistantConfig
 from ..database import Action, Classification, ClassificationStatus, File, FileStatus
 from ..mover import FileMover, MoveResult
 from ..utils.logging import get_logger
+from ..utils.folder_scanner import FolderScanner, FolderScanResult
 
 logger = get_logger(__name__)
 console = Console()
@@ -90,6 +91,10 @@ class FileProcessor:
             db_session=db_session,
         )
 
+        # Folder scanner for providing context to classifier
+        self.folder_scanner = FolderScanner(max_depth=config.folder_scan_depth)
+        self._folder_context: FolderScanResult | None = None
+
     def check_system_ready(self) -> tuple[bool, list[str]]:
         """
         Check if the system is ready to process files.
@@ -115,6 +120,34 @@ class FileProcessor:
 
         return len(issues) == 0, issues
 
+    def _scan_folder_context(self) -> FolderScanResult | None:
+        """
+        Scan folders to provide context for classification.
+
+        Returns:
+            FolderScanResult with existing folder structure
+        """
+        context_folders = self.config.get_context_folders()
+        if not context_folders:
+            return None
+
+        # Filter to only existing folders
+        existing_folders = [f for f in context_folders if f and f.exists()]
+        if not existing_folders:
+            return None
+
+        try:
+            result = self.folder_scanner.scan(existing_folders)
+            if result.total_folders > 0:
+                logger.info(
+                    f"Scanned {result.total_folders} folders for context "
+                    f"(max depth: {result.max_depth_reached})"
+                )
+            return result
+        except Exception as e:
+            logger.warning(f"Failed to scan folders for context: {e}")
+            return None
+
     def _display_classification(
         self, classification: ClassificationResult, analysis: AnalysisResult
     ):
@@ -127,7 +160,11 @@ class FileProcessor:
         table.add_row("File", classification.filename)
         table.add_row("Size", f"{analysis.metadata.size_bytes / 1024:.1f} KB")
         table.add_row("", "")
-        table.add_row("Destination", classification.destination_folder)
+
+        # Show destination with folder status indicator
+        folder_status = "[yellow][new folder][/yellow]" if classification.is_new_folder else "[green][existing][/green]"
+        table.add_row("Destination", f"{classification.destination_folder} {folder_status}")
+
         table.add_row("Tags", ", ".join(classification.tags) if classification.tags else "(none)")
         table.add_row("Confidence", f"{classification.confidence:.0%} ({classification.confidence_level})")
 
@@ -273,9 +310,16 @@ class FileProcessor:
 
         console.print(f"[green]✓[/green] Analyzed: {analysis.word_count} words, {analysis.metadata.size_bytes / 1024:.1f} KB")
 
-        # Step 2: Classify
+        # Step 2: Scan folders for context (if not already done)
+        if self._folder_context is None:
+            console.print("[cyan]Scanning[/cyan] existing folder structure...")
+            self._folder_context = self._scan_folder_context()
+            if self._folder_context and self._folder_context.total_folders > 0:
+                console.print(f"[green]✓[/green] Found {self._folder_context.total_folders} existing folders")
+
+        # Step 3: Classify
         console.print(f"[cyan]Classifying[/cyan] with {self.config.ai_settings.model_name}...")
-        classification = self.classifier.classify(analysis)
+        classification = self.classifier.classify(analysis, folder_context=self._folder_context)
         result.classification = classification
 
         if not classification.success:
@@ -285,7 +329,7 @@ class FileProcessor:
 
         console.print("[green]✓[/green] Classification complete")
 
-        # Step 3: Display and get user decision
+        # Step 4: Display and get user decision
         self._display_classification(classification, analysis)
 
         if interactive:
@@ -305,7 +349,7 @@ class FileProcessor:
             console.print("[yellow]Skipped[/yellow]")
             return result
 
-        # Step 4: Move file
+        # Step 5: Move file
         final_destination = edited_dest or classification.destination_folder
         console.print(f"[cyan]Moving[/cyan] to {final_destination}...")
 

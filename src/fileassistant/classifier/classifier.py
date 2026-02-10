@@ -9,6 +9,7 @@ import httpx
 
 from ..analyzer.analyzer import AnalysisResult
 from ..config.models import AISettings, ConfidenceThresholds
+from ..utils.folder_scanner import FolderScanResult
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -27,6 +28,9 @@ class ClassificationResult:
     tags: list[str] = field(default_factory=list)
     confidence: float = 0.0
     reasoning: str = ""
+
+    # Folder status
+    is_new_folder: bool = True  # True if destination doesn't exist yet
 
     # Status
     success: bool = True
@@ -155,30 +159,102 @@ class FileClassifier:
     - Confidence score
     """
 
-    CLASSIFICATION_PROMPT_TEMPLATE = '''You are a file organization assistant. Analyze this file and suggest where it should be stored.
+    # Prompt template with folder context and comprehensive tag requirements
+    CLASSIFICATION_PROMPT_TEMPLATE = '''You are a file organization assistant. Your job is to classify files and suggest the best destination folder.
 
-FILE INFORMATION:
+## FILE INFORMATION
 - Filename: {filename}
 - Extension: {extension}
 - Size: {size} bytes
 - Created: {created}
 - Modified: {modified}
 
-FILE CONTENT (preview):
+## FILE CONTENT (preview)
 {content_preview}
 
-Based on this information, determine:
-1. The most appropriate destination folder (use a logical folder structure like "Documents/Work", "Projects/Personal", "Finances/Receipts", etc.)
-2. Relevant tags for this file
-3. Your confidence in this classification (0.0 to 1.0)
-4. Brief reasoning for your decision
+## EXISTING FOLDER STRUCTURE
+The user already has these folders organized. STRONGLY PREFER using an existing folder over creating a new one:
+{folder_context}
 
-Respond ONLY with valid JSON in this exact format (no other text):
+## YOUR TASK
+
+1. **DESTINATION FOLDER**: Choose where this file should go.
+   - IMPORTANT: If an existing folder from the list above is a reasonable fit, USE IT.
+   - Only suggest a NEW folder path if no existing folder is appropriate.
+   - Use forward slashes (/) for path separators.
+
+2. **TAGS**: Generate 8-15 comprehensive tags for searchability. Include:
+   - Document type (lecture-notes, invoice, receipt, contract, essay, code, etc.)
+   - Topic/subject matter (math, physics, cooking, finance, programming, etc.)
+   - Course/class/project name if apparent (numerical-analysis, cs101, home-renovation, etc.)
+   - Time period if apparent (spring-2025, q4-2024, january, etc.)
+   - Key concepts/entities mentioned (newton-method, python, tax-return, etc.)
+   - File format category (pdf, document, spreadsheet, image, etc.)
+   - Context category (school, work, personal, reference, etc.)
+   - Any other relevant descriptors
+
+   Tags should be lowercase, use hyphens for multi-word tags.
+
+3. **CONFIDENCE**: Rate 0.0-1.0 based on how certain you are about the classification.
+   - 0.9+ = Very confident, clear category
+   - 0.7-0.9 = Reasonably confident
+   - 0.5-0.7 = Uncertain, could fit multiple places
+   - <0.5 = Very uncertain
+
+4. **REASONING**: Brief explanation of your choice.
+
+5. **IS_NEW_FOLDER**: Set to true ONLY if suggesting a folder that doesn't exist in the list above.
+
+## RESPONSE FORMAT
+Respond ONLY with valid JSON (no other text):
+{{
+    "destination_folder": "ExistingOrNew/Subfolder",
+    "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"],
+    "confidence": 0.85,
+    "reasoning": "Brief explanation",
+    "is_new_folder": false
+}}'''
+
+    # Fallback prompt when no folder context is available
+    CLASSIFICATION_PROMPT_NO_CONTEXT = '''You are a file organization assistant. Analyze this file and suggest where it should be stored.
+
+## FILE INFORMATION
+- Filename: {filename}
+- Extension: {extension}
+- Size: {size} bytes
+- Created: {created}
+- Modified: {modified}
+
+## FILE CONTENT (preview)
+{content_preview}
+
+## YOUR TASK
+
+1. **DESTINATION FOLDER**: Suggest a logical folder path (e.g., "School/Numerical Analysis", "Work/Projects", "Personal/Finances").
+
+2. **TAGS**: Generate 8-15 comprehensive tags for searchability. Include:
+   - Document type (lecture-notes, invoice, receipt, contract, essay, code, etc.)
+   - Topic/subject matter (math, physics, cooking, finance, programming, etc.)
+   - Course/class/project name if apparent
+   - Time period if apparent (spring-2025, q4-2024, etc.)
+   - Key concepts/entities mentioned
+   - File format category
+   - Context category (school, work, personal, reference, etc.)
+
+   Tags should be lowercase, use hyphens for multi-word tags.
+
+3. **CONFIDENCE**: Rate 0.0-1.0 based on certainty.
+
+4. **REASONING**: Brief explanation.
+
+## RESPONSE FORMAT
+Respond ONLY with valid JSON (no other text):
 {{
     "destination_folder": "Category/Subcategory",
-    "tags": ["tag1", "tag2", "tag3"],
+    "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"],
     "confidence": 0.85,
-    "reasoning": "Brief explanation of why this classification was chosen"
+    "reasoning": "Brief explanation",
+    "is_new_folder": true
 }}'''
 
     def __init__(
@@ -203,6 +279,24 @@ Respond ONLY with valid JSON in this exact format (no other text):
             max_retries=self.ai_settings.max_retries,
         )
 
+        # Folder context (set via set_folder_context before classification)
+        self._folder_context: FolderScanResult | None = None
+        self._existing_folders: set[str] = set()
+
+    def set_folder_context(self, folder_scan: FolderScanResult):
+        """
+        Set the folder context for classification.
+
+        Args:
+            folder_scan: Result from scanning existing folders
+        """
+        self._folder_context = folder_scan
+        # Build set of existing folder paths for quick lookup
+        self._existing_folders = set(
+            path.lower() for path in folder_scan.get_all_paths()
+        )
+        logger.info(f"Set folder context with {len(self._existing_folders)} existing folders")
+
     def check_ollama_status(self) -> tuple[bool, str]:
         """
         Check if Ollama is ready for classification.
@@ -220,20 +314,54 @@ Respond ONLY with valid JSON in this exact format (no other text):
 
     def _build_prompt(self, analysis: AnalysisResult) -> str:
         """Build the classification prompt from analysis result."""
-        return self.CLASSIFICATION_PROMPT_TEMPLATE.format(
-            filename=analysis.metadata.filename,
-            extension=analysis.metadata.extension,
-            size=analysis.metadata.size_bytes,
-            created=analysis.metadata.created_at.strftime("%Y-%m-%d %H:%M"),
-            modified=analysis.metadata.modified_at.strftime("%Y-%m-%d %H:%M"),
-            content_preview=analysis.content_preview[:2000],  # Limit context size
-        )
+        # Common template values
+        template_values = {
+            "filename": analysis.metadata.filename,
+            "extension": analysis.metadata.extension,
+            "size": analysis.metadata.size_bytes,
+            "created": analysis.metadata.created_at.strftime("%Y-%m-%d %H:%M"),
+            "modified": analysis.metadata.modified_at.strftime("%Y-%m-%d %H:%M"),
+            "content_preview": analysis.content_preview[:3000],  # Increased for better context
+        }
 
-    def _parse_response(self, response: str, file_path: Path) -> ClassificationResult:
+        # Use prompt with folder context if available
+        if self._folder_context and self._folder_context.total_folders > 0:
+            folder_context = self._folder_context.to_prompt_context(max_folders=75)
+            template_values["folder_context"] = folder_context
+            return self.CLASSIFICATION_PROMPT_TEMPLATE.format(**template_values)
+        else:
+            return self.CLASSIFICATION_PROMPT_NO_CONTEXT.format(**template_values)
+
+    def _is_existing_folder(self, destination: str) -> bool:
+        """Check if a destination folder already exists."""
+        if not self._existing_folders:
+            return False
+
+        # Normalize the destination for comparison
+        normalized = destination.lower().strip("/\\").replace("\\", "/")
+
+        # Check exact match
+        if normalized in self._existing_folders:
+            return True
+
+        # Check if it's a subfolder of any existing folder
+        # or if any existing folder is a parent
+        for existing in self._existing_folders:
+            if normalized.startswith(existing + "/") or existing.startswith(normalized + "/"):
+                return True
+            if normalized == existing:
+                return True
+
+        return False
+
+    def _parse_response(
+        self, response: str, file_path: Path
+    ) -> ClassificationResult:
         """Parse LLM response into ClassificationResult."""
         try:
             # Try to extract JSON from response (LLM might add extra text)
-            json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+            # Use a more robust regex that handles nested structures
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
             if not json_match:
                 raise ValueError("No JSON object found in response")
 
@@ -244,6 +372,7 @@ Respond ONLY with valid JSON in this exact format (no other text):
             tags = data.get("tags", [])
             confidence = float(data.get("confidence", 0.5))
             reasoning = data.get("reasoning", "No reasoning provided")
+            is_new_folder = data.get("is_new_folder", True)
 
             # Sanitize destination folder (remove leading/trailing slashes, etc.)
             destination = destination.strip("/\\").replace("\\", "/")
@@ -256,7 +385,24 @@ Respond ONLY with valid JSON in this exact format (no other text):
             # Ensure tags is a list of strings
             if not isinstance(tags, list):
                 tags = [str(tags)] if tags else []
-            tags = [str(t).strip() for t in tags if t]
+            # Clean and normalize tags
+            tags = [
+                str(t).strip().lower().replace(" ", "-")
+                for t in tags
+                if t and str(t).strip()
+            ]
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_tags = []
+            for tag in tags:
+                if tag not in seen:
+                    seen.add(tag)
+                    unique_tags.append(tag)
+            tags = unique_tags
+
+            # Double-check is_new_folder against our actual folder knowledge
+            # The LLM might not always get this right
+            actual_is_new = not self._is_existing_folder(destination)
 
             return ClassificationResult(
                 file_path=file_path,
@@ -265,6 +411,7 @@ Respond ONLY with valid JSON in this exact format (no other text):
                 tags=tags,
                 confidence=confidence,
                 reasoning=reasoning,
+                is_new_folder=actual_is_new,
                 success=True,
             )
 
@@ -277,20 +424,30 @@ Respond ONLY with valid JSON in this exact format (no other text):
                 tags=[],
                 confidence=0.0,
                 reasoning="",
+                is_new_folder=True,
                 success=False,
                 error_message=f"Failed to parse LLM response: {e}",
             )
 
-    def classify(self, analysis: AnalysisResult) -> ClassificationResult:
+    def classify(
+        self,
+        analysis: AnalysisResult,
+        folder_context: FolderScanResult | None = None,
+    ) -> ClassificationResult:
         """
         Classify a file based on its analysis results.
 
         Args:
             analysis: AnalysisResult from the analyzer component
+            folder_context: Optional folder scan result (overrides instance context)
 
         Returns:
             ClassificationResult with suggested destination and tags
         """
+        # Use provided context or fall back to instance context
+        if folder_context:
+            self.set_folder_context(folder_context)
+
         # Handle failed analysis
         if not analysis.success:
             return ClassificationResult(
@@ -300,6 +457,7 @@ Respond ONLY with valid JSON in this exact format (no other text):
                 tags=[],
                 confidence=0.0,
                 reasoning="",
+                is_new_folder=True,
                 success=False,
                 error_message=f"Analysis failed: {analysis.error_message}",
             )
@@ -308,6 +466,7 @@ Respond ONLY with valid JSON in this exact format (no other text):
         prompt = self._build_prompt(analysis)
 
         logger.info(f"Classifying {analysis.file_path.name} with {self.ai_settings.model_name}")
+        logger.debug(f"Using folder context: {self._folder_context is not None}")
 
         response = self.ollama.generate(prompt)
 
@@ -319,6 +478,7 @@ Respond ONLY with valid JSON in this exact format (no other text):
                 tags=[],
                 confidence=0.0,
                 reasoning="",
+                is_new_folder=True,
                 success=False,
                 error_message="Failed to get response from Ollama",
             )
@@ -326,27 +486,35 @@ Respond ONLY with valid JSON in this exact format (no other text):
         result = self._parse_response(response, analysis.file_path)
 
         if result.success:
+            folder_status = "existing" if not result.is_new_folder else "new"
             logger.info(
                 f"Classified {analysis.file_path.name}: "
-                f"destination='{result.destination_folder}', "
+                f"destination='{result.destination_folder}' ({folder_status}), "
                 f"confidence={result.confidence:.2f}, "
-                f"tags={result.tags}"
+                f"tags={len(result.tags)} tags"
             )
 
         return result
 
     def classify_multiple(
-        self, analyses: list[AnalysisResult]
+        self,
+        analyses: list[AnalysisResult],
+        folder_context: FolderScanResult | None = None,
     ) -> list[ClassificationResult]:
         """
         Classify multiple files.
 
         Args:
             analyses: List of AnalysisResult objects
+            folder_context: Optional folder scan result
 
         Returns:
             List of ClassificationResult objects
         """
+        # Set context once for all classifications
+        if folder_context:
+            self.set_folder_context(folder_context)
+
         results: list[ClassificationResult] = []
         for analysis in analyses:
             results.append(self.classify(analysis))

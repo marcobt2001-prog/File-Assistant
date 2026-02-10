@@ -127,6 +127,19 @@ class FileAssistantConfig(BaseModel):
         default_factory=DatabaseSettings, description="Database settings"
     )
 
+    # Folder context for classification
+    scan_folders_for_context: list[Path] | None = Field(
+        default=None,
+        description="Additional folders to scan for context (defaults to organized_base_path)",
+    )
+
+    folder_scan_depth: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="Maximum depth to scan folders for context",
+    )
+
     # Feature flags
     auto_process_enabled: bool = Field(
         default=False, description="Enable automatic file processing (vs. manual approval)"
@@ -135,6 +148,13 @@ class FileAssistantConfig(BaseModel):
     learning_enabled: bool = Field(
         default=True, description="Learn from user corrections to improve classification"
     )
+
+    def get_context_folders(self) -> list[Path]:
+        """Get the list of folders to scan for classification context."""
+        if self.scan_folders_for_context:
+            return self.scan_folders_for_context
+        # Default to organized_base_path
+        return [self.organized_base_path]
 
     @field_validator("organized_base_path")
     @classmethod

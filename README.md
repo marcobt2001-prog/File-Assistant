@@ -109,7 +109,7 @@ See [config/config.example.yaml](config/config.example.yaml) for a documented ex
 
 ## 🏗️ Project Status
 
-**Phase 0: Foundation** ✅ (Current)
+**Phase 0: Foundation** ✅ Complete
 
 - [x] Project structure
 - [x] Configuration system with Pydantic validation
@@ -117,15 +117,23 @@ See [config/config.example.yaml](config/config.example.yaml) for a documented ex
 - [x] Logging infrastructure (Rich console + file logs)
 - [x] Basic CLI commands
 
-**Phase 1: MVP** 🚧 (Next)
+**Phase 1: MVP Pipeline** ✅ Complete
 
-- [ ] File watcher for inbox folders
-- [ ] Document text extraction (PDF, DOCX, TXT)
-- [ ] Basic classification with local LLM
-- [ ] File moving with user confirmation
-- [ ] Action logging
+- [x] File watcher for inbox folders
+- [x] Document text extraction (PDF, DOCX, TXT, MD)
+- [x] Classification with local LLM (Ollama + Qwen 2.5)
+- [x] Folder context awareness (prefers existing folders)
+- [x] Comprehensive tag generation (8-15 tags per file)
+- [x] File moving with user confirmation
+- [x] Action logging with undo capability
 
-See the [full project plan](docs/file-organizer-project-plan.md) for roadmap details.
+**Phase 2: Search & Intelligence** 🔜 Next
+
+- **Phase 2A: Search Foundation** — Embedding generation, ChromaDB index, bulk indexer, search CLI
+- **Phase 2B: Integration** — Similarity-based classification boost, multi-inbox support, undo command
+- **Phase 2C: Learning & Autonomy** — Confidence scoring, auto-actions, learning from corrections
+
+See the [updated Phase 2 plan](docs/FileAssistant-Phase2-Updated-Plan.md) for details.
 
 ---
 
@@ -135,13 +143,18 @@ See the [full project plan](docs/file-organizer-project-plan.md) for roadmap det
 fileassistant/
 ├── src/
 │   └── fileassistant/
-│       ├── cli/            # Click-based CLI
+│       ├── cli/            # Click-based CLI commands
 │       ├── config/         # Configuration management
+│       ├── core/           # Processing pipeline orchestrator
 │       ├── database/       # SQLite schema & migrations
-│       └── utils/          # Logging and utilities
+│       ├── watcher/        # File system monitoring
+│       ├── analyzer/       # Document text extraction
+│       ├── classifier/     # AI classification (Ollama)
+│       ├── mover/          # File operations with undo
+│       └── utils/          # Logging, folder scanning, utilities
 ├── tests/                  # Unit tests
 ├── config/                 # Configuration files
-├── docs/                   # Documentation
+├── docs/                   # Documentation & plans
 ├── pyproject.toml          # Project metadata & dependencies
 └── README.md               # This file
 ```
@@ -225,4 +238,4 @@ For questions, suggestions, or feedback, please open an issue on GitHub.
 
 ---
 
-**Note**: FileAssistant is in early development (Phase 0). Core file organization features are coming in Phase 1.
+**Note**: FileAssistant has completed Phase 1 (MVP). Search and intelligence features are coming in Phase 2.
